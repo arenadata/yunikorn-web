@@ -82,8 +82,38 @@ Run `ng generate component component-name` to generate a new component.
 
 You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
 
+## Web server
+The Go web server (`pkg/webserver`) is built on the shared webservice from
+`yunikorn-core` (`pkg/webservice`): the router serves the embedded static UI,
+while a proxy middleware forwards requests under `/ws/` to the k8shim REST API
+at `YUNIKORN_K8SHIM_URL` (default `http://127.0.0.1:9080`). All configuration
+is read from `YUNIKORN_`-prefixed environment variables by the single
+`webservice.Config` type — see the `yunikorn-core` README for the full
+variable reference.
+
 ## Port configurations
-The default port used for the web server is port 9889.
+The default port used for the web server is port 9889; it can be changed with
+the `YUNIKORN_LISTEN_ADDRESS` environment variable. TLS for the listener is
+enabled with `YUNIKORN_TLS_CERT_FILE` / `YUNIKORN_TLS_KEY_FILE`.
+
+## Authentication
+Authentication is split into two independent legs configured separately so the
+settings cannot be confused:
+
+- user -> web: how end users authenticate to this web server, configured with
+  `YUNIKORN_AUTH_MODE` (`mtls`, `shared_secret`, `ldap`, `kerberos`,
+  `kerberos_ldap`) and the related `YUNIKORN_AUTH_*` / `YUNIKORN_LDAP_*` /
+  `YUNIKORN_KEYTAB_PATH` variables;
+- web -> k8shim: how this web server authenticates to the k8shim REST API when
+  proxying `/ws/` requests. The user's `Authorization` header is never
+  forwarded. Options:
+  - shared secret: `YUNIKORN_K8SHIM_AUTH_SHARED_SECRET=<secret>` here, and the
+    same secret on the k8shim side as `YUNIKORN_AUTH_MODE=shared_secret` +
+    `YUNIKORN_AUTH_SHARED_SECRET=<secret>`; the proxy attaches a token signed
+    from the authenticated user identity to every forwarded request;
+  - mTLS: `YUNIKORN_K8SHIM_TLS_CERT_FILE`, `YUNIKORN_K8SHIM_TLS_KEY_FILE`,
+    `YUNIKORN_K8SHIM_TLS_CA_FILE` here, and `YUNIKORN_AUTH_MODE=mtls` with
+    `YUNIKORN_TLS_*` on the k8shim side.
 
 ## How do I contribute code?
 See how to contribute code from [this guide](https://yunikorn.apache.org/community/how_to_contribute).
