@@ -15,12 +15,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ARG NODE_VERSION=24.16
-# Buildstage: use the local architecture
-FROM --platform=$BUILDPLATFORM node:${NODE_VERSION}-alpine AS buildstage
-
+# Build frontend assets
+FROM node:24.16-alpine AS frontend
 WORKDIR /work
-# Only copy what is needed for the build
 COPY *.json *.js *.yaml .browserslistrc /work/
 COPY src /work/src/
 ARG PNPM_VERSION=11.5
@@ -29,11 +26,22 @@ RUN pnpm fetch
 RUN pnpm install -r --offline
 RUN pnpm build:prod
 
-# Imagestage: use scratch base image
+# Build Go binary with embedded frontend assets
+FROM golang:1.25-alpine as backend
+WORKDIR /build
+
+COPY go.mod go.sum ./
+RUN go mod download
+COPY pkg ./pkg
+COPY --from=frontend /work/pkg/webserver/dist ./pkg/webserver/dist
+
+RUN CGO_ENABLED=0 go build -a -o /out/yunikorn-web -trimpath -ldflags '-s -w' ./pkg/cmd/web
+
+# Final image
 FROM scratch
-COPY --chown=0:0 NOTICE LICENSE build/prod/yunikorn-web /
-COPY --chown=0:0 --from=buildstage /work/dist/yunikorn-web /html/
+
+COPY --from=backend /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+COPY --from=backend /out/yunikorn-web /yunikorn-web
+
 EXPOSE 9889
-ENV DOCUMENT_ROOT=/html
-USER 4444:4444
 ENTRYPOINT [ "/yunikorn-web" ]

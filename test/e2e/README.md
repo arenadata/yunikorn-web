@@ -1,0 +1,88 @@
+# E2E authentication tests
+
+End to end tests for every authentication mode of the yunikorn-core webservice
+and for the authentication variants between yunikorn-web and the
+yunikorn-k8shim REST API.
+
+The servers under test are the real ones:
+
+- the **core webservice** server (`webservice.NewWebServer`) — the exact stack
+  the k8shim serves on `:9080` (`entrypoint` → `StartWebApp`) and as the
+  metrics-only listener (`exposeMetricsOnly`). The route table is the real
+  scheduler REST route table; only the handlers are replaced with an identity
+  echo so tests can observe the authenticated user, groups and headers that
+  reached the handler.
+- the **yunikorn-web** server (`webserver.NewWebServer`) — embedded UI plus
+  the `/ws/` reverse proxy towards the k8shim.
+
+Both are configured through `YUNIKORN_*` environment variables, exactly like
+the deployed services. External dependencies run in
+[testcontainers](https://golang.testcontainers.org/):
+
+- **OpenLDAP** (`osixia/openldap`), seeded from `testdata/ldap/seed.ldif`
+- **MIT Kerberos KDC**, built from `testdata/kdc/`
+
+## Running
+
+Requires Docker.
+
+```sh
+cd test/e2e
+go test ./...
+```
+
+The LDAP and KDC containers start once per `go test` run, on first use.
+
+## Coverage
+
+Core webservice authentication (user → k8shim listener), `core_auth_test.go`:
+
+| Mode | Tests |
+|---|---|
+| disabled | all route categories served unauthenticated |
+| `shared_secret` | valid/invalid/expired/foreign-secret tokens, wrong scheme, identity propagation |
+| `shared_secret` + LDAP | group enrichment from the directory when the token carries no groups |
+| `ldap` | BasicAuth against the directory, `YK_AUTH` cookie issue/replay/tamper, allowed-groups authorization |
+| `ldap` RBAC | admin/viewer/service roles mapped from LDAP groups per route category; no-role and allowed-groups-only users |
+| `kerberos` | SPNEGO against the service keytab, `X-Groups` injection (only with `YUNIKORN_USE_X_GROUPS`), broken keytab fails closed |
+| `kerberos_ldap` | SPNEGO authentication plus LDAP role authorization |
+| metrics override | `YUNIKORN_METRICS_AUTH_MODE=none` and a dedicated metrics secret on the metrics-only listener |
+| `mtls` | client certificate required and verified against the configured CA |
+| route guard | unknown route categories are 403 whenever authentication is enabled |
+
+yunikorn-web ↔ yunikorn-k8shim (`web_shim_test.go`):
+
+| Variant | Tests |
+|---|---|
+| header hygiene | the user's `Authorization` header never reaches the shim |
+| shared secret leg | proxy signs a fresh token from the authenticated identity; user and groups propagate; the user token itself does not |
+| secret mismatch | shim with a different secret rejects proxied requests |
+| no user auth | without an authenticated identity no token is attached — protected shim rejects |
+| TLS | web verifies the shim server certificate against `YUNIKORN_K8SHIM_TLS_CA_FILE`; untrusted certificate → 502 |
+| mTLS | shim in `mtls` mode accepts only web instances presenting the configured client certificate |
+| LDAP end to end | browser BasicAuth → web (`ldap` mode, RBAC) → shim (`shared_secret`); cookie replay; viewer role enforced before proxying |
+| Kerberos end to end | browser SPNEGO → web (`kerberos` mode, `X-Groups`) → shim (`shared_secret`) |
+
+## Deployment notes discovered by these tests
+
+- **MIT krb5 ≥ 1.20 KDC**: service tickets carry a minimal PAC by default and
+  the SPNEGO service in yunikorn-core fails to decode it
+  (`PAC Info Buffers does not contain a KerbValidationInfo`). Create the HTTP
+  service principal with `+no_auth_data_required` (see
+  `testdata/kdc/entrypoint.sh`), or the `kerberos`/`kerberos_ldap` modes reject
+  every ticket. Active Directory KDCs are not affected.
+- **LDAP ACLs**: group membership is looked up on the connection re-bound as
+  the authenticated user, so users need read access to the user and group
+  subtrees (Active Directory default). For OpenLDAP an explicit
+  `to * by users read` ACL is required (see `testdata/ldap/acl.ldif`).
+- **memberOf vs group entries**: when the directory returns a `memberOf`
+  attribute, the group tokens are the full lowercased DNs, which cannot be
+  listed in the comma-separated `YUNIKORN_LDAP_*_GROUPS` variables (DNs contain
+  commas). Role mappings by plain group name (cn) work when membership is
+  resolved through the group entry search — directories without `memberOf`, or
+  `YUNIKORN_LDAP_GROUP_ATTRIBUTE` pointed at an unused attribute.
+- **`ldap` mode always authorizes**: with `YUNIKORN_AUTH_MODE=ldap` every
+  route (including the static UI) goes through role authorization; without any
+  `YUNIKORN_LDAP_{ADMIN,VIEWER,SERVICE,ALLOWED}_GROUPS` configured all users
+  are 403. The viewer role can query the scheduler API but cannot load the
+  static UI (the `StaticUI` category is not among its allowed routes).

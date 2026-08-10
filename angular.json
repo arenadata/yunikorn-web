@@ -25,7 +25,7 @@
           "builder": "@angular/build:application",
           "options": {
             "outputPath": {
-              "base": "dist/yunikorn-web",
+              "base": "pkg/webserver/dist",
               "browser": ""
             },
             "index": "src/index.html",

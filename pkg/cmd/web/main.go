@@ -24,6 +24,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/apache/yunikorn-core/pkg/webservice"
 	"github.com/apache/yunikorn-web/pkg/webserver"
 )
 
@@ -33,31 +34,23 @@ var (
 )
 
 func main() {
-	documentRoot := envOrDefault("DOCUMENT_ROOT", "dist/yunikorn-web")
-	listenAddress := envOrDefault("LISTEN_ADDRESS", ":9889")
-	proxyUrl := envOrDefault("PROXY_URL", "http://127.0.0.1:9080")
-	log.Default().Printf("Starting yunikorn-web version: %s, buildDate: %s, docRoot: %s, listenAddress: %s, proxyUrl: %s",
-		version, date, documentRoot, listenAddress, proxyUrl)
-	server, err := webserver.NewWebServer(documentRoot, listenAddress, proxyUrl)
+	config, err := webservice.LoadConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Starting yunikorn-web version: %s, buildDate: %s, listenAddress: %s",
+		version, date, config.ListenAddress)
+
+	server, err := webserver.NewWebServer(config)
 	if err != nil {
 		log.Fatal(err)
 	}
 	server.Start()
 
-	done := make(chan struct{})
-	go func() {
-		c := make(chan os.Signal, 1)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-		<-c
-		close(done)
-	}()
-	<-done
-	server.Stop()
-}
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
 
-func envOrDefault(envVar, defValue string) string {
-	if result, ok := os.LookupEnv(envVar); ok {
-		return result
-	}
-	return defValue
+	server.Stop()
 }

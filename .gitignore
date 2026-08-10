@@ -9,6 +9,7 @@
 /bazel-out
 /tools
 /build.date
+/pkg/webserver/dist
 
 # Node
 /node_modules

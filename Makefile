@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-.PHONY: test test_go test_js_coverage test_js
+.PHONY: test test_go test_js_coverage test_js test_e2e_auth
 .PHONY: license-check lint
 .PHONY: build start-dev build_server_dev json-server clean distclean
 .PHONY: tools deps run build-prod build_server_prod image
@@ -54,6 +54,8 @@ DEV_BIN_DIR=${OUTPUT}/dev
 RELEASE_BIN_DIR=${OUTPUT}/prod
 SERVER_BINARY=yunikorn-web
 REPO=github.com/apache/yunikorn-web/pkg
+FRONTEND_DIST_DIR=dist/yunikorn-web
+WEB_DIST_DIR=pkg/webserver/dist
 
 IMAGE_SOURCE?=https://github.com/apache/yunikorn-web
 IMAGE_URL?=https://hub.docker.com/r/apache/yunikorn
@@ -138,7 +140,7 @@ NPM := npm
 endif
 
 # pnpm
-PNPM_VERSION=11.5
+PNPM_VERSION=11.17
 PNPM_BIN=$(TOOLS_DIR)/bin/pnpm
 
 # @angular/cli
@@ -225,7 +227,7 @@ test_js_coverage: deps
 	$(PNPM_BIN) test:coverage
 
 # Run Go unit tests
-test_go:
+test_go: build
 	@mkdir -p "$(OUTPUT)"
 	"$(GO)" clean -testcache
 	"$(GO)" test ./pkg/... -cover -race -tags deadlock -coverprofile=build/coverage.txt -covermode=atomic
@@ -234,13 +236,17 @@ test_go:
 # Run the tests after building
 test: test_js test_go
 
+# Run the authentication e2e tests (requires Docker for testcontainers)
+test_e2e_auth:
+	cd test/e2e && "$(GO)" test -count=1 ./...
+
 # Build the web interface in a production ready version
 build-prod: deps
 	$(PNPM_BIN) build:prod
 
 # Simple clean of generated files only (no local cleanup).
 clean:
-	@rm -rf ./dist ./coverage ./node_modules ./build ./bin ./out ./out-tsc ./coverage.txt
+	@rm -rf ./dist ./coverage ./node_modules ./build ./bin ./out ./out-tsc ./coverage.txt ./pkg/webserver/dist
 
 # Remove all dist files
 distclean: clean
@@ -274,6 +280,10 @@ build_server_dev: $(DEV_BIN_DIR)/$(SERVER_BINARY)
 $(DEV_BIN_DIR)/$(SERVER_BINARY): go.mod go.sum $(shell find pkg)
 	@echo "building local web server binary"
 	@mkdir -p "${DEV_BIN_DIR}"
+	"$(PNPM_BIN)" ng build
+	@rm -rf "${WEB_DIST_DIR}"
+	@mkdir -p "${WEB_DIST_DIR}"
+	@cp -r "${FRONTEND_DIST_DIR}"/* "${WEB_DIST_DIR}/"
 	"$(GO)" build -o=${DEV_BIN_DIR}/${SERVER_BINARY} -race -ldflags \
 	'-buildid= -X main.version=${VERSION} -X main.date=${DATE}' \
 	./pkg/cmd/web/
@@ -283,6 +293,10 @@ build_server_prod: $(RELEASE_BIN_DIR)/$(SERVER_BINARY)
 $(RELEASE_BIN_DIR)/$(SERVER_BINARY): go.mod go.sum $(shell find pkg)
 	@echo "building web server binary"
 	@mkdir -p ${RELEASE_BIN_DIR}
+	"$(PNPM_BIN)" build:prod
+	@rm -rf "${WEB_DIST_DIR}"
+	@mkdir -p "${WEB_DIST_DIR}"
+	@cp -r "${FRONTEND_DIST_DIR}"/* "${WEB_DIST_DIR}/"
 ifeq ($(REPRO),1)
 	docker run -t --rm=true --volume "$(BASE_DIR):/buildroot" "golang:$(GO_REPRO_VERSION)" sh -c "cd /buildroot && \
 	CGO_ENABLED=0 GOOS=linux GOARCH=\"${EXEC_ARCH}\" \
