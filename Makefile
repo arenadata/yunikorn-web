@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-.PHONY: test test_go test_js_coverage test_js
+.PHONY: test test_go test_js_coverage test_js test_e2e_auth
 .PHONY: license-check lint
 .PHONY: build start-dev build_server_dev json-server clean distclean
 .PHONY: tools deps run build-prod build_server_prod image
@@ -235,6 +235,10 @@ test_go: build
 
 # Run the tests after building
 test: test_js test_go
+
+# Run the authentication e2e tests (requires Docker for testcontainers)
+test_e2e_auth:
+	cd test/e2e && "$(GO)" test -count=1 ./...
 
 # Build the web interface in a production ready version
 build-prod: deps
