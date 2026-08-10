@@ -127,38 +127,50 @@ func launchLDAP() (*ldapServer, error) {
 	}
 	registerCleanup(func() { _ = c.Terminate(context.Background()) })
 
-	// slapd may still be bootstrapping right after the port opens: retry the
-	// seed until it applies (exit 0) or already exists (exit 68).
-	deadline := time.Now().Add(2 * time.Minute)
-	for {
-		code, out, execErr := c.Exec(ctx, []string{
-			"ldapadd", "-x", "-H", "ldap://localhost",
-			"-D", ldapAdminDN, "-w", ldapAdminPW, "-f", "/tmp/seed.ldif",
-		})
-		if execErr == nil && (code == 0 || code == 68) {
-			break
-		}
-		if time.Now().After(deadline) {
-			var msg []byte
-			if out != nil {
-				msg, _ = io.ReadAll(out)
-			}
-			return nil, fmt.Errorf("seeding LDAP failed: exit=%d err=%v output=%s", code, execErr, msg)
-		}
-		time.Sleep(2 * time.Second)
-	}
-
-	// The webservice looks groups up on the connection re-bound as the
-	// authenticated user, so authenticated users must be able to read the
-	// directory (as they can in Active Directory); the default ACL of this
-	// image only lets a user read their own entry.
-	code, out, execErr := c.Exec(ctx, []string{"ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/tmp/acl.ldif"})
-	if execErr != nil || code != 0 {
+	// The port opens while the image's first-start bootstrap may still be
+	// running, and that bootstrap can overwrite cn=config changes applied too
+	// early. Instead of relying on timing, repeat the whole sequence — seed
+	// the entries, apply the ACL, verify — until the directory is actually in
+	// the state the tests need. The ACL is required because the webservice
+	// looks groups up on the connection re-bound as the authenticated user,
+	// so users must be able to read the directory (as they can in Active
+	// Directory); the image's default ACL only lets a user read their own
+	// entry. The verification therefore searches as a regular user.
+	exec := func(cmd ...string) (int, string, error) {
+		code, out, execErr := c.Exec(ctx, cmd)
 		var msg []byte
 		if out != nil {
 			msg, _ = io.ReadAll(out)
 		}
-		return nil, fmt.Errorf("applying LDAP ACL failed: exit=%d err=%v output=%s", code, execErr, msg)
+		return code, string(msg), execErr
+	}
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		var step, msg string
+		var code int
+		var execErr error
+
+		// exit 0 = seeded, exit 68 = entries already exist
+		step = "seed"
+		code, msg, execErr = exec("ldapadd", "-x", "-H", "ldap://localhost",
+			"-D", ldapAdminDN, "-w", ldapAdminPW, "-f", "/tmp/seed.ldif")
+		if execErr == nil && (code == 0 || code == 68) {
+			step = "acl"
+			code, msg, execErr = exec("ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/tmp/acl.ldif")
+		}
+		if execErr == nil && code == 0 {
+			step = "verify user read access"
+			code, msg, execErr = exec("ldapsearch", "-x", "-H", "ldap://localhost",
+				"-D", "uid=bob,ou=people,"+ldapBaseDN, "-w", "bobpw",
+				"-b", "ou=groups,"+ldapBaseDN, "-s", "base", "dn")
+		}
+		if execErr == nil && code == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("LDAP bootstrap failed at %q: exit=%d err=%v output=%s", step, code, execErr, msg)
+		}
+		time.Sleep(2 * time.Second)
 	}
 
 	host, err := c.Host(ctx)
