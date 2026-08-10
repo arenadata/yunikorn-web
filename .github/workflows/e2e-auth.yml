@@ -1,0 +1,39 @@
+name: E2E Auth Tests
+
+on:
+  pull_request:
+    branches:
+      - master
+      - ad/web-*
+  workflow_dispatch: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' }}
+
+jobs:
+  e2e-auth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v6
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: .go_version
+          check-latest: true
+          cache-dependency-path: |
+            go.sum
+            test/e2e/go.sum
+      - name: Set Node.js Environment
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: '.nvmrc'
+      # the e2e module embeds the web UI (pkg/webserver/dist is generated,
+      # not checked in), so the Angular build must run first
+      - name: Build Web UI
+        run: make build
+      - name: E2E auth tests
+        run: make test_e2e_auth
