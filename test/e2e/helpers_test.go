@@ -28,6 +28,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -38,6 +39,7 @@ import (
 	"time"
 
 	"github.com/apache/yunikorn-core/pkg/webservice"
+
 	"github.com/go-krb5/x/identity"
 	"gotest.tools/v3/assert"
 )
@@ -118,16 +120,39 @@ func echoRoutes() []webservice.Route {
 	return rts
 }
 
-// echoResponse is what identityEcho reports back about the request it served.
+// echoResponse is what identityEcho reports back about the request it served:
+// the authenticated identity and the request itself, so proxy tests can assert
+// what actually arrived at the k8shim.
 type echoResponse struct {
 	User          string   `json:"user"`
 	Groups        []string `json:"groups"`
 	Authorization string   `json:"authorization"`
 	Authenticated bool     `json:"authenticated"`
+
+	Method         string `json:"method"`
+	Path           string `json:"path"`
+	RawQuery       string `json:"rawQuery"`
+	Host           string `json:"host"`
+	Body           string `json:"body"`
+	ForwardedFor   string `json:"forwardedFor"`
+	ForwardedHost  string `json:"forwardedHost"`
+	ForwardedProto string `json:"forwardedProto"`
 }
 
 func identityEcho(w http.ResponseWriter, r *http.Request) {
-	resp := echoResponse{Authorization: r.Header.Get("Authorization")}
+	resp := echoResponse{
+		Authorization:  r.Header.Get("Authorization"),
+		Method:         r.Method,
+		Path:           r.URL.Path,
+		RawQuery:       r.URL.RawQuery,
+		Host:           r.Host,
+		ForwardedFor:   r.Header.Get("X-Forwarded-For"),
+		ForwardedHost:  r.Header.Get("X-Forwarded-Host"),
+		ForwardedProto: r.Header.Get("X-Forwarded-Proto"),
+	}
+	if body, err := io.ReadAll(r.Body); err == nil {
+		resp.Body = string(body)
+	}
 	if id := identity.FromHTTPRequestContext(r); id != nil {
 		resp.User = id.UserName()
 		resp.Authenticated = id.Authenticated()
@@ -196,6 +221,20 @@ func withCookie(c *http.Cookie) func(*http.Request) {
 func doGet(t *testing.T, client *http.Client, url string, opts ...func(*http.Request)) *http.Response {
 	t.Helper()
 	resp, err := tryGet(client, url, opts...)
+	assert.NilError(t, err)
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+func doPost(t *testing.T, client *http.Client, url, contentType, body string, opts ...func(*http.Request)) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	assert.NilError(t, err)
+	req.Header.Set("Content-Type", contentType)
+	for _, o := range opts {
+		o(req)
+	}
+	resp, err := client.Do(req)
 	assert.NilError(t, err)
 	t.Cleanup(func() { _ = resp.Body.Close() })
 	return resp

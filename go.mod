@@ -64,4 +64,4 @@ require (
 	google.golang.org/protobuf v1.36.11 // indirect
 )
 
-replace github.com/apache/yunikorn-core => github.com/arenadata/yunikorn-core v1.9.1-0.20260807135404-7dc590f0be55
+replace github.com/apache/yunikorn-core => github.com/arenadata/yunikorn-core v1.9.1-0.20260820130534-7deee5a36d9a

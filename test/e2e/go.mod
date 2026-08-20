@@ -7,6 +7,7 @@ require (
 	github.com/apache/yunikorn-web v0.0.0
 	github.com/go-krb5/krb5 v0.1.0
 	github.com/go-krb5/x v0.3.2
+	github.com/julienschmidt/httprouter v1.3.0
 	github.com/testcontainers/testcontainers-go v0.43.0
 	gotest.tools/v3 v3.5.2
 )
@@ -41,7 +42,6 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/julienschmidt/httprouter v1.3.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/looplab/fsm v1.0.3 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect

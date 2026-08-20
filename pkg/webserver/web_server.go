@@ -19,8 +19,11 @@
 package webserver
 
 import (
+	"context"
 	"embed"
+	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -28,11 +31,22 @@ import (
 	"time"
 
 	"github.com/apache/yunikorn-core/pkg/webservice"
+
 	"github.com/go-krb5/x/identity"
 )
 
 //go:embed dist/*
 var documentRoot embed.FS
+
+const (
+	// k8ShimUnixScheme marks a K8Shim.URL pointing at a unix socket file
+	// instead of a TCP endpoint, e.g. unix:///var/run/yunikorn/k8shim.sock.
+	k8ShimUnixScheme = "unix"
+	// k8ShimUnixHost is the placeholder authority used for requests sent over
+	// the unix socket: the dialer ignores the address, but the outbound
+	// request still needs a syntactically valid host.
+	k8ShimUnixHost = "localhost"
+)
 
 // NewWebServer builds the web UI server on top of the shared core webservice
 // server: the /ws/ routes forward requests to the k8shim REST API, everything
@@ -89,9 +103,15 @@ func proxyRoutes(proxy http.Handler) []webservice.Route {
 
 // newK8ShimProxy builds the reverse proxy towards the k8shim REST API.
 func newK8ShimProxy(conf *webservice.Config) (*httputil.ReverseProxy, error) {
-	origin, err := url.Parse(conf.K8Shim.URL)
+	origin, socketPath, err := parseK8ShimURL(conf.K8Shim.URL)
 	if err != nil {
 		return nil, err
+	}
+	if len(socketPath) > 0 && conf.K8Shim.TLS != nil {
+		// the k8shim socket listener speaks plain HTTP: the socket file
+		// permissions are the access control on that leg, so silently dropping
+		// the configured client certificates would be a surprise
+		return nil, fmt.Errorf("k8shim TLS is not supported with a unix socket URL %q", conf.K8Shim.URL)
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -102,7 +122,7 @@ func newK8ShimProxy(conf *webservice.Config) (*httputil.ReverseProxy, error) {
 			// leg authenticates itself with a token signed from the
 			// authenticated request identity using the k8shim shared secret.
 			pr.Out.Header.Del("Authorization")
-			if conf.K8Shim.SharedSecret != "" {
+			if len(conf.K8Shim.SharedSecret) > 0 {
 				if id := identity.FromHTTPRequestContext(pr.In); id != nil {
 					token := webservice.SignToken(conf.K8Shim.SharedSecret,
 						id.UserName(), identityGroups(id), time.Now().Add(5*time.Minute))
@@ -112,7 +132,17 @@ func newK8ShimProxy(conf *webservice.Config) (*httputil.ReverseProxy, error) {
 		},
 	}
 
-	if conf.K8Shim.TLS != nil {
+	switch {
+	case len(socketPath) > 0:
+		// every connection goes to the socket file, whatever host the rewritten
+		// request carries
+		dialer := new(net.Dialer)
+		proxy.Transport = &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return dialer.DialContext(ctx, k8ShimUnixScheme, socketPath)
+			},
+		}
+	case conf.K8Shim.TLS != nil:
 		tlsConfig, err := conf.K8Shim.TLS.TLSConfig()
 		if err != nil {
 			return nil, err
@@ -120,6 +150,39 @@ func newK8ShimProxy(conf *webservice.Config) (*httputil.ReverseProxy, error) {
 		proxy.Transport = &http.Transport{TLSClientConfig: tlsConfig}
 	}
 	return proxy, nil
+}
+
+// parseK8ShimURL validates the configured k8shim address and splits it into
+// the origin requests are rewritten to and, for unix URLs, the socket file to
+// dial. The returned socket path is empty for the TCP schemes.
+func parseK8ShimURL(raw string) (*url.URL, string, error) {
+	origin, err := url.Parse(raw)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid k8shim URL %q: %w", raw, err)
+	}
+
+	switch origin.Scheme {
+	case "http", "https":
+		if origin.Host == "" {
+			return nil, "", fmt.Errorf("invalid k8shim URL %q: missing host", raw)
+		}
+		return origin, "", nil
+	case k8ShimUnixScheme:
+		// unix:///run/k8shim.sock and unix:/run/k8shim.sock both name an
+		// absolute socket path; an authority is the first segment of a
+		// relative one (unix://k8shim.sock), as is an opaque part
+		// (unix:k8shim.sock)
+		socketPath := origin.Opaque
+		if len(socketPath) == 0 {
+			socketPath = origin.Host + origin.Path
+		}
+		if len(socketPath) == 0 {
+			return nil, "", fmt.Errorf("invalid k8shim URL %q: missing socket path", raw)
+		}
+		return &url.URL{Scheme: "http", Host: k8ShimUnixHost}, socketPath, nil
+	default:
+		return nil, "", fmt.Errorf("unsupported k8shim URL scheme %q: want http, https or unix", origin.Scheme)
+	}
 }
 
 // identityGroups extracts the groups attribute from a request identity.
