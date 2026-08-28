@@ -24,11 +24,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/testcontainers/testcontainers-go"
+	tcexec "github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
@@ -62,6 +65,10 @@ var (
 	ldapOnce sync.Once
 	ldapSrv  *ldapServer
 	ldapErr  error
+
+	ldapMemberOfOnce sync.Once
+	ldapMemberOfSrv  *ldapServer
+	ldapMemberOfErr  error
 
 	kdcOnce sync.Once
 	kdcSrv  *kdcServer
@@ -118,7 +125,13 @@ func launchLDAP() (*ldapServer, error) {
 				ContainerFilePath: "/tmp/acl.ldif",
 				FileMode:          0o644,
 			}},
-			WaitingFor: wait.ForListeningPort("389/tcp").WithStartupTimeout(3 * time.Minute),
+			// the port first opens on a temporary slapd the image then stops and
+			// reconfigures, discarding anything seeded into it; "slapd starting"
+			// is logged once, by the final slapd
+			WaitingFor: wait.ForAll(
+				wait.ForLog("slapd starting"),
+				wait.ForListeningPort("389/tcp"),
+			).WithDeadline(3 * time.Minute),
 		},
 		Started: true,
 	})
@@ -169,6 +182,138 @@ func launchLDAP() (*ldapServer, error) {
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("LDAP bootstrap failed at %q: exit=%d err=%v output=%s", step, code, execErr, msg)
+		}
+		time.Sleep(2 * time.Second)
+	}
+
+	host, err := c.Host(ctx)
+	if err != nil {
+		return nil, err
+	}
+	port, err := c.MappedPort(ctx, "389/tcp")
+	if err != nil {
+		return nil, err
+	}
+	return &ldapServer{URL: fmt.Sprintf("ldap://%s:%s", host, port.Port())}, nil
+}
+
+// startLDAPMemberOfContainer starts (once per test run) a second OpenLDAP
+// server, seeded like startLDAPContainer but with the memberof overlay, so
+// users carry a memberOf attribute holding group DNs.
+func startLDAPMemberOfContainer(t *testing.T) *ldapServer {
+	t.Helper()
+	ldapMemberOfOnce.Do(func() { ldapMemberOfSrv, ldapMemberOfErr = launchLDAPMemberOf() })
+	if ldapMemberOfErr != nil {
+		t.Fatalf("unable to start memberOf LDAP container: %v", ldapMemberOfErr)
+	}
+	return ldapMemberOfSrv
+}
+
+// launchLDAPMemberOf is a deliberate near duplicate of launchLDAP: the group
+// entry search runs only when the group attribute yields nothing, so one
+// directory can cover only one of the two paths. Keep them separate.
+//
+// The overlay does not backfill, and ldapadd will not rewrite entries that
+// already exist, so every attempt deletes the data tree before seeding. Groups
+// go first: olcMemberOfRefInt rewrites surviving group entries when their
+// members disappear, which can leave a groupOfNames with no member at all.
+func launchLDAPMemberOf() (*ldapServer, error) {
+	ctx := context.Background()
+	c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "osixia/openldap:1.5.0",
+			ExposedPorts: []string{"389/tcp"},
+			Env: map[string]string{
+				"LDAP_ORGANISATION":   "Example",
+				"LDAP_DOMAIN":         "example.org",
+				"LDAP_ADMIN_PASSWORD": ldapAdminPW,
+			},
+			Files: []testcontainers.ContainerFile{{
+				HostFilePath:      "testdata/ldap/memberof.ldif",
+				ContainerFilePath: "/tmp/memberof.ldif",
+				FileMode:          0o644,
+			}, {
+				HostFilePath:      "testdata/ldap/seed.ldif",
+				ContainerFilePath: "/tmp/seed.ldif",
+				FileMode:          0o644,
+			}, {
+				HostFilePath:      "testdata/ldap/acl.ldif",
+				ContainerFilePath: "/tmp/acl.ldif",
+				FileMode:          0o644,
+			}},
+			// see launchLDAP
+			WaitingFor: wait.ForAll(
+				wait.ForLog("slapd starting"),
+				wait.ForListeningPort("389/tcp"),
+			).WithDeadline(3 * time.Minute),
+		},
+		Started: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	registerCleanup(func() { _ = c.Terminate(context.Background()) })
+
+	// Multiplexed strips the docker stream framing, whose frame headers can
+	// otherwise land mid line and defeat the content check below.
+	exec := func(cmd ...string) (int, string, error) {
+		code, out, execErr := c.Exec(ctx, cmd, tcexec.Multiplexed())
+		var msg []byte
+		if out != nil {
+			msg, _ = io.ReadAll(out)
+		}
+		return code, string(msg), execErr
+	}
+	svcDN := "uid=svc1,ou=people," + ldapBaseDN
+	deadline := time.Now().Add(3 * time.Minute)
+	for {
+		var step, msg string
+		var code int
+		var execErr error
+		ok := true
+
+		// each step runs only once the previous one succeeded; the reset makes
+		// every attempt rewrite the entries, so the verification at the end is
+		// the only real gate
+		run := func(name string, tolerate []int, cmd ...string) {
+			if !ok {
+				return
+			}
+			step = name
+			code, msg, execErr = exec(cmd...)
+			ok = execErr == nil && slices.Contains(tolerate, code)
+		}
+
+		// exit 32 = the subtree is not there
+		run("reset groups", []int{0, 32}, "ldapdelete", "-x", "-H", "ldap://localhost",
+			"-D", ldapAdminDN, "-w", ldapAdminPW, "-r", "ou=groups,"+ldapBaseDN)
+		run("reset people", []int{0, 32}, "ldapdelete", "-x", "-H", "ldap://localhost",
+			"-D", ldapAdminDN, "-w", ldapAdminPW, "-r", "ou=people,"+ldapBaseDN)
+		// exit 20 = the overlay survived an earlier attempt; the module itself
+		// is already loaded by the image
+		run("memberof overlay", []int{0, 20},
+			"ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/tmp/memberof.ldif")
+		// exit 0 = seeded, exit 68 = a reset did not take; verification decides
+		run("seed", []int{0, 68}, "ldapadd", "-x", "-H", "ldap://localhost",
+			"-D", ldapAdminDN, "-w", ldapAdminPW, "-f", "/tmp/seed.ldif")
+		run("acl", []int{0},
+			"ldapmodify", "-Y", "EXTERNAL", "-H", "ldapi:///", "-f", "/tmp/acl.ldif")
+		run("verify user read access", []int{0}, "ldapsearch", "-x", "-H", "ldap://localhost",
+			"-D", "uid=bob,ou=people,"+ldapBaseDN, "-w", "bobpw",
+			"-b", "ou=groups,"+ldapBaseDN, "-s", "base", "dn")
+		// memberOf is operational, so it must be asked for by name, and a search
+		// returning the entry without it still exits 0 - hence the content check
+		run("verify memberOf populated", []int{0}, "ldapsearch", "-x", "-H", "ldap://localhost",
+			"-D", svcDN, "-w", "svc1pw", "-b", svcDN, "-s", "base", "-LLL", "memberOf")
+		if ok && !strings.Contains(strings.ToLower(msg), "memberof: cn=yk-service") {
+			step, ok = "verify memberOf populated: attribute missing", false
+		}
+		if ok {
+			break
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("memberOf LDAP bootstrap failed at %q: exit=%d err=%v output=%s",
+				step, code, execErr, msg)
 		}
 		time.Sleep(2 * time.Second)
 	}
