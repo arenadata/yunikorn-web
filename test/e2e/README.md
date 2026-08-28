@@ -24,7 +24,10 @@ They are configured through `YUNIKORN_*` environment variables, exactly like
 the deployed services. External dependencies run in
 [testcontainers](https://golang.testcontainers.org/):
 
-- **OpenLDAP** (`osixia/openldap`), seeded from `testdata/ldap/seed.ldif`
+- **OpenLDAP** (`osixia/openldap`) ×2, both seeded from `testdata/ldap/seed.ldif`:
+  one plain, one with the `memberof` overlay (`testdata/ldap/memberof.ldif`).
+  The group entry search runs only when the group attribute yields nothing, so
+  a single directory can cover only one of the two paths.
 - **MIT Kerberos KDC**, built from `testdata/kdc/`
 
 ## Running
@@ -49,6 +52,7 @@ Core webservice authentication (user → k8shim listener), `core_auth_test.go`:
 | `shared_secret` + LDAP | group enrichment from the directory when the token carries no groups |
 | `ldap` | BasicAuth against the directory, `YK_AUTH` cookie issue/replay/tamper, allowed-groups authorization |
 | `ldap` RBAC | admin/viewer/service roles mapped from LDAP groups per route category; no-role and allowed-groups-only users |
+| `ldap` RBAC + `memberOf` | the same role outcomes against the overlay directory, where membership resolves to DNs; also pins that a group DN cannot be configured as a role |
 | `kerberos` | SPNEGO against the service keytab, `X-Groups` injection (only with `YUNIKORN_USE_X_GROUPS`), broken keytab fails closed |
 | `kerberos_ldap` | SPNEGO authentication plus LDAP role authorization |
 | metrics override | `YUNIKORN_METRICS_AUTH_MODE=none` and a dedicated metrics secret on the metrics-only listener |
@@ -98,12 +102,15 @@ yunikorn-web ↔ yunikorn-k8shim over a unix socket (`web_socket_test.go`),
   the authenticated user, so users need read access to the user and group
   subtrees (Active Directory default). For OpenLDAP an explicit
   `to * by users read` ACL is required (see `testdata/ldap/acl.ldif`).
-- **memberOf vs group entries**: when the directory returns a `memberOf`
-  attribute, the group tokens are the full lowercased DNs, which cannot be
-  listed in the comma-separated `YUNIKORN_LDAP_*_GROUPS` variables (DNs contain
-  commas). Role mappings by plain group name (cn) work when membership is
-  resolved through the group entry search — directories without `memberOf`, or
-  `YUNIKORN_LDAP_GROUP_ATTRIBUTE` pointed at an unused attribute.
+- **memberOf vs group entries**: both resolution paths end up matching the
+  plain group name (cn), so the `YUNIKORN_LDAP_*_GROUPS` role sets are
+  configured the same way either way. When the directory returns a `memberOf`
+  attribute the raw tokens are full DNs, and only the leading RDN value is kept;
+  when it does not, membership is resolved through the group entry search
+  (`member=<dn>`), which yields the cn directly. A group DN can therefore never
+  be configured as a role: the role lists are also comma separated, and DNs
+  contain commas. The group entry search only runs when the group attribute
+  yields nothing, which is why the two paths need two directories to test.
 - **`ldap` mode always authorizes**: with `YUNIKORN_AUTH_MODE=ldap` every
   route (including the static UI) goes through role authorization; without any
   `YUNIKORN_LDAP_{ADMIN,VIEWER,SERVICE,ALLOWED}_GROUPS` configured all users

@@ -93,6 +93,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/apache/yunikorn-core => github.com/arenadata/yunikorn-core v1.9.1-0.20260807135404-7dc590f0be55
+replace github.com/apache/yunikorn-core => github.com/arenadata/yunikorn-core v1.9.1-0.20260828062855-812efb37eb4a
 
 replace github.com/apache/yunikorn-web => ../..

@@ -35,10 +35,8 @@ import (
 )
 
 // ldapEnv is the YUNIKORN_LDAP_* connection block shared by the LDAP-backed
-// tests. The directory does not maintain a memberOf attribute, so group
-// membership resolves through the group entry search (member=<dn>), which
-// yields the plain cn group names the YUNIKORN_LDAP_*_GROUPS role sets are
-// matched against.
+// tests. Which group resolution path a test exercises depends on the directory
+// it is pointed at, not on anything here.
 func ldapEnv(l *ldapServer) map[string]string {
 	return map[string]string{
 		"YUNIKORN_LDAP_URL":           l.URL,
@@ -252,6 +250,77 @@ func TestCoreLDAPAuthorizationRBAC(t *testing.T) {
 		}
 		resp := doGet(t, http.DefaultClient, allowedBase+clusterPath, withBasic("admin1", "admin1pw"))
 		assert.Equal(t, resp.StatusCode, http.StatusForbidden, "admin1 is not in yk-users")
+	})
+}
+
+// TestCoreLDAPAuthorizationMemberOf: the same role based authorization as
+// TestCoreLDAPAuthorizationRBAC, but against a directory that populates
+// memberOf, so group membership resolves to DNs rather than through the group
+// entry search. Configured group names stay short - that is the contract this
+// pins.
+func TestCoreLDAPAuthorizationMemberOf(t *testing.T) {
+	l := startLDAPMemberOfContainer(t)
+	// YUNIKORN_LDAP_GROUP_ATTRIBUTE is left unset so the memberOf default
+	// applies; loadConfig clears every YUNIKORN_* first
+	roleEnv := map[string]string{
+		"YUNIKORN_AUTH_MODE":           "ldap",
+		"YUNIKORN_LDAP_COOKIE_SECRET":  "cookie-secret",
+		"YUNIKORN_LDAP_ADMIN_GROUPS":   "yk-admins",
+		"YUNIKORN_LDAP_VIEWER_GROUPS":  "yk-viewers",
+		"YUNIKORN_LDAP_SERVICE_GROUPS": "yk-service",
+	}
+	base := startCoreServer(t, mergeEnv(ldapEnv(l), roleEnv), echoRoutes())
+
+	tests := []struct {
+		user, pass string
+		wants      map[string]int
+	}{
+		{"admin1", "admin1pw", map[string]int{
+			clusterPath:   http.StatusOK,
+			schedulerPath: http.StatusOK,
+			metricsPath:   http.StatusOK,
+		}},
+		{"viewer1", "viewer1pw", map[string]int{
+			clusterPath:   http.StatusForbidden,
+			schedulerPath: http.StatusOK,
+			metricsPath:   http.StatusForbidden,
+		}},
+		{"svc1", "svc1pw", map[string]int{
+			clusterPath:   http.StatusForbidden,
+			schedulerPath: http.StatusForbidden,
+			metricsPath:   http.StatusOK,
+		}},
+		{"bob", "bobpw", map[string]int{
+			clusterPath:   http.StatusForbidden,
+			schedulerPath: http.StatusForbidden,
+			metricsPath:   http.StatusForbidden,
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.user, func(t *testing.T) {
+			for path, want := range tc.wants {
+				resp := doGet(t, http.DefaultClient, base+path, withBasic(tc.user, tc.pass))
+				assert.Equal(t, resp.StatusCode, want, "%s on %s", tc.user, path)
+			}
+		})
+	}
+
+	t.Run("wrong password rejected", func(t *testing.T) {
+		resp := doGet(t, http.DefaultClient, base+schedulerPath, withBasic("svc1", "wrong"))
+		assert.Equal(t, resp.StatusCode, http.StatusUnauthorized)
+	})
+
+	// Two independent reasons the DN below cannot match: GroupSet.UnmarshalText
+	// splits the role lists on ",", and normalizeLDAPGroupNames keeps only the
+	// leading RDN value. Only meaningful next to the subtests above, which prove
+	// group resolution works on this directory - split out on its own this would
+	// pass on a broken bootstrap.
+	t.Run("group DN cannot be configured as a role", func(t *testing.T) {
+		dnBase := startCoreServer(t, mergeEnv(ldapEnv(l), roleEnv, map[string]string{
+			"YUNIKORN_LDAP_ADMIN_GROUPS": "cn=yk-admins,ou=groups," + ldapBaseDN,
+		}), echoRoutes())
+		resp := doGet(t, http.DefaultClient, dnBase+clusterPath, withBasic("admin1", "admin1pw"))
+		assert.Equal(t, resp.StatusCode, http.StatusForbidden)
 	})
 }
 
