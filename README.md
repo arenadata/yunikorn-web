@@ -115,5 +115,32 @@ settings cannot be confused:
     `YUNIKORN_K8SHIM_TLS_CA_FILE` here, and `YUNIKORN_AUTH_MODE=mtls` with
     `YUNIKORN_TLS_*` on the k8shim side.
 
+### UI login
+
+In the `ldap` mode the UI signs in through a page of its own instead of the
+browser's Basic dialog. The web server serves three endpoints for it, and the
+static bundle is public, so that the page loads before anyone has logged in:
+
+| method | path | purpose |
+|--------|------|---------|
+| `POST` | `/auth/login` | `{"username": "...", "password": "..."}`, sets the `YK_AUTH` cookie |
+| `POST` | `/auth/logout` | expires that cookie in the browser |
+| `GET` | `/auth/whoami` | the enforced mode and, with a session, the user and the display name |
+
+The cookie is `Secure`, so the login page only works over HTTPS; a browser
+counts `localhost` as secure as well. `YUNIKORN_LDAP_COOKIE_TTL` (default `1h`)
+is an idle timeout: the cookie is renewed while the user is active, but never
+past `YUNIKORN_LDAP_SESSION_MAX_LIFETIME` (default `12h`) after the login.
+
+Logout only deletes the cookie in the browser. The server keeps no session
+state, so a copy of the cookie taken before the logout stays valid until it
+expires, and a request answered after the logout would set it again. Rotating
+`YUNIKORN_LDAP_COOKIE_SECRET` ends every session at once.
+
+API clients keep using Basic auth with the credentials sent upfront. The web
+server answers a plain `401` without `WWW-Authenticate`, so that no browser
+dialog opens; the scheduler's own listener still challenges. The Kerberos modes
+have no login and no logout, and `whoami` reports the principal.
+
 ## How do I contribute code?
 See how to contribute code from [this guide](https://yunikorn.apache.org/community/how_to_contribute).

@@ -620,9 +620,9 @@ func TestWebLDAPUserEndToEndOverUnixSocket(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusForbidden)
 	})
 
-	t.Run("an unauthenticated browser is challenged", func(t *testing.T) {
+	t.Run("an unauthenticated browser is refused without a challenge", func(t *testing.T) {
 		resp := doGet(t, http.DefaultClient, web+clusterPath)
 		assert.Equal(t, resp.StatusCode, http.StatusUnauthorized)
-		assert.Assert(t, resp.Header.Get("WWW-Authenticate") != "")
+		assert.Equal(t, resp.Header.Get("WWW-Authenticate"), "")
 	})
 }
