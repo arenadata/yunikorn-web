@@ -49,8 +49,9 @@ const (
 )
 
 // NewWebServer builds the web UI server on top of the shared core webservice
-// server: the /ws/ routes forward requests to the k8shim REST API, everything
-// else is served from the embedded static UI.
+// server: the /ws/ routes forward requests to the k8shim REST API, the /auth
+// routes serve the login of the UI, everything else is served from the
+// embedded static UI.
 func NewWebServer(conf *webservice.Config) (*webservice.WebServer, error) {
 	staticRoute, err := staticUIRoute()
 	if err != nil {
@@ -62,7 +63,11 @@ func NewWebServer(conf *webservice.Config) (*webservice.WebServer, error) {
 		return nil, err
 	}
 
+	// the UI has a login page of its own, so the browser must not be challenged
+	conf.NoBasicChallenge = true
+
 	routes := append(proxyRoutes(proxy), staticRoute)
+	routes = append(routes, webservice.AuthRoutes(conf)...)
 	return webservice.NewWebServer(conf, conf.ListenAddress, routes), nil
 }
 
@@ -74,11 +79,19 @@ func staticUIRoute() (webservice.Route, error) {
 	if err != nil {
 		return webservice.Route{}, err
 	}
+	files := http.FileServer(http.FS(staticFS))
 	return webservice.Route{
-		Name:        webservice.RouteNameStaticUI,
-		Method:      http.MethodGet,
-		Pattern:     "/*filepath",
-		HandlerFunc: http.FileServer(http.FS(staticFS)).ServeHTTP,
+		Name:    webservice.RouteNameStaticUI,
+		Method:  http.MethodGet,
+		Pattern: "/*filepath",
+		HandlerFunc: func(w http.ResponseWriter, r *http.Request) {
+			// the bundle is public in the ldap mode: serve files, not listings
+			if r.URL.Path != "/" && strings.HasSuffix(r.URL.Path, "/") {
+				http.NotFound(w, r)
+				return
+			}
+			files.ServeHTTP(w, r)
+		},
 	}, nil
 }
 
