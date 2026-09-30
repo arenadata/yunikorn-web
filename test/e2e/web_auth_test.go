@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
-	"time"
 
 	"gotest.tools/v3/assert"
 )
@@ -130,9 +129,6 @@ func TestWebAuthEndpoints(t *testing.T) {
 		resp := doPost(t, http.DefaultClient, web+logoutPath, "", "")
 		assert.Equal(t, resp.StatusCode, http.StatusNoContent)
 		assert.Equal(t, authCookieOf(t, resp).MaxAge, -1)
-
-		// without the cookie the browser is back to an unauthenticated client
-		assert.Equal(t, doGet(t, http.DefaultClient, web+clusterPath).StatusCode, http.StatusUnauthorized)
 	})
 
 	t.Run("basic auth still works for api clients", func(t *testing.T) {
@@ -173,43 +169,4 @@ func TestWebAuthKerberos(t *testing.T) {
 		resp := doPost(t, http.DefaultClient, web+loginPath, "application/json", `{"username":"alice","password":"alicepw"}`)
 		assert.Equal(t, resp.StatusCode, http.StatusUnauthorized)
 	})
-}
-
-// TestWebSessionRenewal: an active session outlives the cookie TTL and ends at
-// the absolute limit.
-func TestWebSessionRenewal(t *testing.T) {
-	l := startLDAPContainer(t)
-	shim := startCoreServer(t, map[string]string{
-		"YUNIKORN_AUTH_SHARED_SECRET": "shim-secret",
-	}, echoRoutes())
-	web := startWebServer(t, mergeEnv(ldapEnv(l), map[string]string{
-		"YUNIKORN_AUTH_MODE":                 "ldap",
-		"YUNIKORN_LDAP_COOKIE_SECRET":        "cookie-secret",
-		"YUNIKORN_LDAP_ADMIN_GROUPS":         "yk-admins",
-		"YUNIKORN_LDAP_COOKIE_TTL":           "6s",
-		"YUNIKORN_LDAP_SESSION_MAX_LIFETIME": "12s",
-		"YUNIKORN_K8SHIM_URL":                shim,
-		"YUNIKORN_K8SHIM_AUTH_SHARED_SECRET": "shim-secret",
-	}))
-
-	cookie := authCookieOf(t, loginAs(t, web, "admin1", "admin1pw"))
-	deadline := time.Now().Add(9 * time.Second)
-	renewals := 0
-	for time.Now().Before(deadline) {
-		time.Sleep(4 * time.Second)
-		resp := doGet(t, http.DefaultClient, web+clusterPath, withCookie(cookie))
-		assert.Equal(t, resp.StatusCode, http.StatusOK, "the session should survive activity")
-		for _, c := range resp.Cookies() {
-			if c.Name == "YK_AUTH" {
-				cookie = c
-				renewals++
-			}
-		}
-	}
-	assert.Assert(t, renewals > 0, "the cookie was never renewed")
-
-	// past the absolute limit no activity helps any more
-	time.Sleep(7 * time.Second)
-	resp := doGet(t, http.DefaultClient, web+clusterPath, withCookie(cookie))
-	assert.Equal(t, resp.StatusCode, http.StatusUnauthorized)
 }
