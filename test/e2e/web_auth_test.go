@@ -100,8 +100,8 @@ func TestWebAuthEndpoints(t *testing.T) {
 		assert.Equal(t, resp.Header.Get("WWW-Authenticate"), "")
 	})
 
-	t.Run("body that is not a pair of credentials", func(t *testing.T) {
-		resp := doPost(t, http.DefaultClient, web+loginPath, "application/json", `{"username":"alice"}`)
+	t.Run("malformed body", func(t *testing.T) {
+		resp := doPost(t, http.DefaultClient, web+loginPath, "application/json", `not json`)
 		assert.Equal(t, resp.StatusCode, http.StatusBadRequest)
 	})
 
