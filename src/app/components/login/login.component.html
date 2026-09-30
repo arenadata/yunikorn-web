@@ -1,0 +1,79 @@
+<!--
+* Licensed to the Apache Software Foundation (ASF) under one
+* or more contributor license agreements.  See the NOTICE file
+* distributed with this work for additional information
+* regarding copyright ownership.  The ASF licenses this file
+* to you under the Apache License, Version 2.0 (the
+* "License"); you may not use this file except in compliance
+* with the License.  You may obtain a copy of the License at
+*
+*     http://www.apache.org/licenses/LICENSE-2.0
+*
+* Unless required by applicable law or agreed to in writing, software
+* distributed under the License is distributed on an "AS IS" BASIS,
+* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+* See the License for the specific language governing permissions and
+* limitations under the License.
+-->
+
+<main class="login-page">
+  <mat-card appearance="outlined" class="login-card">
+    <div class="login-brand">
+      <img src="./assets/images/logo.png" alt="" />
+      <span>YuniKorn</span>
+    </div>
+    <mat-card-header>
+      <mat-card-title>Sign in</mat-card-title>
+      <mat-card-subtitle>Use your LDAP account to continue</mat-card-subtitle>
+    </mat-card-header>
+    <mat-card-content>
+      @if (!isSecureContext) {
+        <p class="login-notice" role="alert">
+          HTTPS required. Open YuniKorn over HTTPS to sign in securely.
+        </p>
+      } @else if (showLoginForm) {
+        <form #loginForm="ngForm" (ngSubmit)="submitLogin()">
+          <mat-form-field appearance="outline" class="login-field">
+            <mat-label>Username</mat-label>
+            <input
+              matInput
+              [(ngModel)]="username"
+              name="username"
+              autocomplete="username"
+              required
+            />
+            @if (loginForm.submitted && !username) {
+              <mat-error>Username is required</mat-error>
+            }
+          </mat-form-field>
+          <mat-form-field appearance="outline" class="login-field">
+            <mat-label>Password</mat-label>
+            <input
+              matInput
+              [(ngModel)]="password"
+              name="password"
+              type="password"
+              autocomplete="current-password"
+              required
+            />
+            @if (loginForm.submitted && !password) {
+              <mat-error>Password is required</mat-error>
+            }
+          </mat-form-field>
+          @if (errorMessage) {
+            <p class="login-error" role="alert">{{ errorMessage }}</p>
+          }
+          <button
+            mat-raised-button
+            color="primary"
+            class="login-submit"
+            type="submit"
+            [disabled]="loginForm.invalid || isSubmitting"
+          >
+            {{ isSubmitting ? 'Signing in…' : 'Sign in' }}
+          </button>
+        </form>
+      }
+    </mat-card-content>
+  </mat-card>
+</main>

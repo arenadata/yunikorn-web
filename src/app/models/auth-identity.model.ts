@@ -16,18 +16,16 @@
  * limitations under the License.
  */
 
-import { Injectable } from '@angular/core';
-import { environment } from '@envs/environment';
+export type AuthMode = 'ldap' | 'kerberos' | 'kerberos_ldap' | 'mtls' | 'shared_secret' | 'none';
 
-@Injectable({
-  providedIn: 'root',
-})
-export class EnvconfigService {
-  getSchedulerWebAddress(): string {
-    if (!environment.production) {
-      return '';
-    }
-
-    return window.location.origin;
-  }
+export interface AuthIdentity {
+  readonly mode: AuthMode | null;
+  readonly user: string | null;
+  readonly displayName: string | null;
 }
+
+export const EMPTY_AUTH_IDENTITY: AuthIdentity = {
+  mode: null,
+  user: null,
+  displayName: null,
+};

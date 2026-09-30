@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 
-import { HttpClientTestingModule } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 
 import { EnvconfigService } from './envconfig.service';
@@ -24,18 +23,18 @@ import { EnvconfigService } from './envconfig.service';
 describe('EnvconfigService', () => {
   let service: EnvconfigService;
 
-  beforeAll(() => {
-    TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
-      providers: [EnvconfigService],
-    }).compileComponents();
-  });
-
   beforeEach(() => {
+    TestBed.configureTestingModule({
+      providers: [EnvconfigService],
+    });
     service = TestBed.inject(EnvconfigService);
   });
 
   it('should create the service', () => {
     expect(service).toBeTruthy();
+  });
+
+  it('uses relative scheduler URLs in development', () => {
+    expect(service.getSchedulerWebAddress()).toBe('');
   });
 });

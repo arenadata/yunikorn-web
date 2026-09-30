@@ -16,6 +16,25 @@
  * limitations under the License.
  */
 
-export interface EnvConfig {
-  localSchedulerWebAddress: string;
+import { Injectable } from '@angular/core';
+import { ActivatedRouteSnapshot, CanActivate, Router, RouterStateSnapshot, UrlTree } from '@angular/router';
+
+import { AuthService } from '@app/services/auth/auth.service';
+
+@Injectable({ providedIn: 'root' })
+export class AuthGuard implements CanActivate {
+  constructor(
+    private authService: AuthService,
+    private router: Router
+  ) {}
+
+  canActivate(_route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | UrlTree {
+    const identity = this.authService.currentIdentity;
+
+    if (identity.mode === 'ldap' && !identity.user) {
+      return this.router.createUrlTree(['/login'], { queryParams: { last: state.url } });
+    }
+
+    return true;
+  }
 }

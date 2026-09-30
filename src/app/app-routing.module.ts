@@ -26,36 +26,48 @@ import { AppsViewComponent } from './components/apps-view/apps-view.component';
 import { NodesViewComponent } from './components/nodes-view/nodes-view.component';
 import { StatusViewComponent } from './components/status-view/status-view.component';
 import { ErrorViewComponent } from './components/error-view/error-view.component';
+import { LoginComponent } from './components/login/login.component';
+import { AuthGuard } from './guards/auth.guard';
 
 const appRoutes: Routes = [
   {
+    path: 'login',
+    component: LoginComponent,
+  },
+  {
     path: 'dashboard',
     component: DashboardComponent,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Dashboard' },
   },
   {
     path: 'applications',
     component: AppsViewComponent,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Applications' },
   },
   {
     path: 'queues',
     component: QueuesViewComponent,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Queues' },
   },
   {
     path: 'queues-v2',
     component: QueueV2Component,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Queues V2' },
   },
   {
     path: 'nodes',
     component: NodesViewComponent,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Nodes' },
   },
   {
     path: 'status',
     component: StatusViewComponent,
+    canActivate: [AuthGuard],
     data: { breadcrumb: 'Status' },
   },
   {
