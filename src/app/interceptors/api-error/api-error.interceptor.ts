@@ -28,35 +28,101 @@ import {
   HttpErrorResponse,
 } from '@angular/common/http';
 import { ApiErrorInfo } from '@app/models/api-error-info.model';
+import { AuthService } from '@app/services/auth/auth.service';
 
 @Injectable()
 export class ApiErrorInterceptor implements HttpInterceptor {
-  constructor(private router: Router) {}
+  private ldapLoginNavigationPending = false;
+
+  constructor(
+    private router: Router,
+    private authService: AuthService
+  ) {}
 
   intercept(request: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
-    return next.handle(request).pipe(catchError(this.handleApiError.bind(this)));
+    const requestGeneration = this.authService.generation;
+
+    return next.handle(request).pipe(
+      catchError((response: HttpErrorResponse) =>
+        this.handleApiError(response, request, requestGeneration)
+      )
+    );
   }
 
-  handleApiError(response: HttpErrorResponse) {
-    if (!this.router.url.startsWith('/error')) {
-      this.router.navigate(['/error'], {
-        queryParams: { last: this.router.url },
-        state: this.parseErrorResponse(response.error),
-      });
+  handleApiError(
+    response: HttpErrorResponse,
+    request?: HttpRequest<any>,
+    requestGeneration = this.authService.generation
+  ) {
+    if (request && this.isAuthRequest(request.url)) {
+      return throwError(() => response);
     }
 
+    const mode = this.authService.currentIdentity.mode;
+    if (response.status === 401 && mode === 'ldap') {
+      if (requestGeneration !== this.authService.generation) {
+        return throwError(() => response);
+      }
+
+      this.authService.clearUser();
+      if (!this.router.url.startsWith('/login') && !this.ldapLoginNavigationPending) {
+        this.ldapLoginNavigationPending = true;
+        const navigation = this.router.navigate(['/login'], {
+          queryParams: { last: this.router.url },
+        });
+        navigation.then(
+          () => (this.ldapLoginNavigationPending = false),
+          () => (this.ldapLoginNavigationPending = false)
+        );
+      }
+      return throwError(() => response);
+    }
+
+    if (response.status === 401 && (mode === 'kerberos' || mode === 'kerberos_ldap')) {
+      this.navigateToError(response, 'Kerberos ticket required or expired');
+      return throwError(() => response);
+    }
+
+    if (response.status === 403) {
+      this.navigateToError(response, 'you do not have permission to view this data');
+      return throwError(() => response);
+    }
+
+    this.navigateToError(response);
     return throwError(() => response);
   }
 
-  parseErrorResponse(error: any): ApiErrorInfo | undefined {
+  parseErrorResponse(error: any, message?: string, statusCode?: number): ApiErrorInfo | undefined {
+    if (message) {
+      return {
+        statusCode: statusCode ?? error?.status ?? 0,
+        message,
+        description: '',
+      };
+    }
+
     if (error) {
       return {
-        statusCode: error.StatusCode,
-        message: error.Message,
-        description: error.Description,
+        statusCode: error.StatusCode ?? error.statusCode,
+        message: error.Message ?? error.message,
+        description: error.Description ?? error.description,
       };
     } else {
       return undefined;
     }
+  }
+
+  private navigateToError(response: HttpErrorResponse, message?: string): void {
+    if (!this.router.url.startsWith('/error')) {
+      this.router.navigate(['/error'], {
+        queryParams: { last: this.router.url },
+        state: this.parseErrorResponse(response.error, message, response.status),
+      });
+    }
+  }
+
+  private isAuthRequest(url: string): boolean {
+    const path = url.replace(/^https?:\/\/[^/]+/i, '');
+    return /^\/auth(?:\/|$)/.test(path);
   }
 }

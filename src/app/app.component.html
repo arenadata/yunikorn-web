@@ -16,6 +16,7 @@
 * limitations under the License.
 -->
 
+@if (!isLoginPage) {
 <div class="navigation" [class.open]="isNavOpen">
   <div class="logo">
     <a routerLink="/">
@@ -87,41 +88,72 @@
     <i class="fa fa-angle-double-right"></i>
   </div>
 </div>
-<div class="wrapper">
-  <div class="container-fluid">
-    <div class="header">
-      <div class="breadcrumb-wrapper">
-        <ul class="breadcrumb">
-          @for (crumb of breadcrumbs; track crumb) {
-            <li>
-              <a href="#" [routerLink]="[crumb.url]">{{ crumb.label }}</a>
-            </li>
-          }
-        </ul>
-        <div class="help-menu">
-          <button
-            class="menu-trigger"
-            mat-icon-button
-            matTooltip="Help"
-            matTooltipShowDelay="500"
-            [matMenuTriggerFor]="helpMenu"
-          >
-            <img src="../assets/images/config.svg" />
-          </button>
-          <mat-menu #helpMenu="matMenu" xPosition="before">
-            <button mat-menu-item (click)="openYuniKornHelp('/')">Apache YuniKorn</button>
-            <button mat-menu-item (click)="openYuniKornHelp('/docs')">Documentation</button>
-            <button mat-menu-item (click)="openYuniKornHelp('/community/events')">
-              Sessions and Demos
-            </button>
-            <button mat-menu-item (click)="openYuniKornHelp('/community/get_involved')">
-              Get Involved
-            </button>
-            <button mat-menu-item (click)="openYuniKornLicense()">License Information</button>
-          </mat-menu>
+}
+<div class="wrapper" [class.login-layout]="isLoginPage">
+  <div class="container-fluid" [class.login-layout]="isLoginPage">
+    @if (!isLoginPage) {
+      <div class="header">
+        <div class="breadcrumb-wrapper">
+          <ul class="breadcrumb">
+            @for (crumb of breadcrumbs; track crumb) {
+              <li>
+                <a href="#" [routerLink]="[crumb.url]">{{ crumb.label }}</a>
+              </li>
+            }
+          </ul>
+          <div class="header-actions">
+            @if (authIdentity$ | async; as identity) {
+              @if (identity.user) {
+                @if (identity.mode === 'ldap') {
+                  <button
+                    mat-button
+                    class="user-menu-trigger"
+                    [matMenuTriggerFor]="userMenu"
+                    [disabled]="isLoggingOut"
+                    aria-label="User menu"
+                  >
+                    <span>{{ identity.displayName || identity.user }}</span>
+                    <i class="fa fa-angle-down"></i>
+                  </button>
+                  <mat-menu #userMenu="matMenu" xPosition="before">
+                    <button mat-menu-item (click)="logout()" [disabled]="isLoggingOut">
+                      {{ isLoggingOut ? 'Logging out…' : 'Logout' }}
+                    </button>
+                  </mat-menu>
+                } @else {
+                  <span class="user-name">{{ identity.displayName || identity.user }}</span>
+                }
+              }
+            }
+            <div class="help-menu">
+              <button
+                class="menu-trigger"
+                mat-icon-button
+                matTooltip="Help"
+                matTooltipShowDelay="500"
+                [matMenuTriggerFor]="helpMenu"
+              >
+                <img src="../assets/images/config.svg" />
+              </button>
+              <mat-menu #helpMenu="matMenu" xPosition="before">
+                <button mat-menu-item (click)="openYuniKornHelp('/')">Apache YuniKorn</button>
+                <button mat-menu-item (click)="openYuniKornHelp('/docs')">Documentation</button>
+                <button mat-menu-item (click)="openYuniKornHelp('/community/events')">
+                  Sessions and Demos
+                </button>
+                <button mat-menu-item (click)="openYuniKornHelp('/community/get_involved')">
+                  Get Involved
+                </button>
+                <button mat-menu-item (click)="openYuniKornLicense()">License Information</button>
+              </mat-menu>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
+      @if (logoutError) {
+        <div class="logout-error" role="alert">{{ logoutError }}</div>
+      }
+    }
     <div class="content-wrapper">
       <router-outlet></router-outlet>
     </div>

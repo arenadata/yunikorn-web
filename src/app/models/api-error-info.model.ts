@@ -20,4 +20,6 @@ export interface ApiErrorInfo {
   statusCode: number;
   message: string;
   description: string;
+  forceDisplay?: boolean;
+  authLoginCompletion?: boolean;
 }
