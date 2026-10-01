@@ -31,6 +31,7 @@ dn: uid=alice,ou=people,dc=example,dc=org
 objectClass: inetOrgPerson
 cn: alice
 sn: Liddell
+displayName: Alice Liddell
 uid: alice
 userPassword: alicepw
 

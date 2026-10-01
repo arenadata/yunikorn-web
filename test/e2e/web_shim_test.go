@@ -223,10 +223,11 @@ func TestWebLDAPUserEndToEnd(t *testing.T) {
 		"YUNIKORN_K8SHIM_AUTH_SHARED_SECRET": "shim-secret",
 	}))
 
-	t.Run("unauthenticated browser is challenged", func(t *testing.T) {
+	t.Run("unauthenticated browser is refused without a challenge", func(t *testing.T) {
 		resp := doGet(t, http.DefaultClient, web+clusterPath)
 		assert.Equal(t, resp.StatusCode, http.StatusUnauthorized)
-		assert.Assert(t, resp.Header.Get("WWW-Authenticate") != "")
+		// the UI shows a login page of its own, so no browser dialog is opened
+		assert.Equal(t, resp.Header.Get("WWW-Authenticate"), "")
 	})
 
 	t.Run("admin identity and groups reach the shim", func(t *testing.T) {
@@ -256,13 +257,13 @@ func TestWebLDAPUserEndToEnd(t *testing.T) {
 		assert.Equal(t, resp.StatusCode, http.StatusForbidden)
 	})
 
-	t.Run("static UI follows the same authorization", func(t *testing.T) {
-		resp := doGet(t, http.DefaultClient, web+"/index.html", withBasic("admin1", "admin1pw"))
+	t.Run("static UI is public", func(t *testing.T) {
+		// the bundle carries no scheduler data and has to load before anyone
+		// has logged in, so no role is checked on it
+		resp := doGet(t, http.DefaultClient, web+"/index.html")
 		assert.Equal(t, resp.StatusCode, http.StatusOK)
-		// the StaticUI route category is not among the viewer role's routes:
-		// a viewer can query the scheduler API but not load the UI
 		resp = doGet(t, http.DefaultClient, web+"/index.html", withBasic("viewer1", "viewer1pw"))
-		assert.Equal(t, resp.StatusCode, http.StatusForbidden)
+		assert.Equal(t, resp.StatusCode, http.StatusOK)
 	})
 }
 
