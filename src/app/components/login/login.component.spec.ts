@@ -24,9 +24,9 @@ import { MatButtonModule } from '@angular/material/button';
 import { MatCardModule } from '@angular/material/card';
 import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, convertToParamMap, ParamMap, Router } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
-import { Subject, of } from 'rxjs';
+import { BehaviorSubject, Subject, of } from 'rxjs';
 
 import { AuthIdentity } from '@app/models/auth-identity.model';
 import { AuthLoginResult, AuthService } from '@app/services/auth/auth.service';
@@ -39,6 +39,7 @@ describe('LoginComponent', () => {
   let lastRoute: string;
   let authServiceStub: { currentIdentity: AuthIdentity; login: ReturnType<typeof vi.fn> };
   let router: Router;
+  let routeQueryParams: BehaviorSubject<ParamMap>;
   let originalSecureContext: PropertyDescriptor | undefined;
 
   const setSecureContext = (isSecure: boolean) => {
@@ -51,6 +52,7 @@ describe('LoginComponent', () => {
   });
 
   const createComponent = async () => {
+    routeQueryParams = new BehaviorSubject(convertToParamMap({ last: lastRoute }));
     await TestBed.configureTestingModule({
       imports: [
         CommonModule,
@@ -66,7 +68,10 @@ describe('LoginComponent', () => {
         { provide: AuthService, useValue: authServiceStub },
         {
           provide: ActivatedRoute,
-          useValue: { snapshot: { queryParamMap: { get: (name: string) => name === 'last' ? lastRoute : null } } },
+          useValue: {
+            snapshot: { queryParamMap: routeQueryParams.value },
+            queryParamMap: routeQueryParams.asObservable(),
+          },
         },
       ],
     }).compileComponents();
@@ -173,6 +178,17 @@ describe('LoginComponent', () => {
     component.submitLogin();
 
     expect(router.navigateByUrl).toHaveBeenCalledWith(lastRoute, { replaceUrl: true });
+  });
+
+  it('uses an updated last route when the login route is reused', async () => {
+    await createComponent();
+    routeQueryParams.next(convertToParamMap({ last: '/nodes?partition=default' }));
+    component.username = 'alice';
+    component.password = 'secret';
+
+    component.submitLogin();
+
+    expect(router.navigateByUrl).toHaveBeenCalledWith('/nodes?partition=default', { replaceUrl: true });
   });
 
   it.each(['https://other.example/path', '//other.example/path', '/login?last=%2Fnodes']) (

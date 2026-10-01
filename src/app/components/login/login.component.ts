@@ -46,7 +46,12 @@ export class LoginComponent implements OnInit {
   ) {}
 
   ngOnInit(): void {
-    this.last = this.activatedRoute.snapshot.queryParamMap.get('last') ?? '';
+    this.activatedRoute.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((queryParams) => {
+        this.last = queryParams.get('last') ?? '';
+      });
+
     const identity = this.authService.currentIdentity;
 
     if (identity.mode !== 'ldap' || identity.user) {
