@@ -40,8 +40,12 @@
   font-size: 20px;
   font-weight: 500;
 
-  img {
+  .login-logo {
     width: 42px;
+    height: 34px;
+    flex-shrink: 0;
+    background-color: currentColor;
+    mask: url('../../../assets/images/logo.png') center / contain no-repeat;
   }
 }
 
