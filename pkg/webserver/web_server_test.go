@@ -76,6 +76,36 @@ func TestWebServerServesEmbeddedStaticAndProxy(t *testing.T) {
 	assert.Assert(t, strings.Contains(getBody("/ws/v1/clusters"), "OK"))
 }
 
+// TestWebServerAuthRoutes: the UI login endpoints are served, the browser is
+// not challenged, and the bundle does not list directories.
+func TestWebServerAuthRoutes(t *testing.T) {
+	server, err := NewWebServer(&webservice.Config{
+		ListenAddress: "127.0.0.1:40004",
+		K8Shim:        webservice.K8ShimConfig{URL: "http://127.0.0.1:9080"},
+		Mode:          webservice.AuthModeLDAP,
+		SharedSecret:  "secret",
+		LDAP:          &webservice.LDAPConfig{CookieTTL: time.Hour},
+	})
+	assert.NilError(t, err)
+	handler := server.Handler()
+
+	get := func(path string) *httptest.ResponseRecorder {
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, path, nil))
+		return rr
+	}
+
+	// whoami answers without a session, the scheduler API still does not
+	assert.Equal(t, get("/auth/whoami").Code, http.StatusOK)
+	api := get("/ws/v1/clusters")
+	assert.Equal(t, api.Code, http.StatusUnauthorized)
+	assert.Equal(t, api.Header().Get("WWW-Authenticate"), "")
+
+	// the bundle is public in this mode, but a directory is not listed
+	assert.Equal(t, get("/").Code, http.StatusOK)
+	assert.Equal(t, get("/assets/").Code, http.StatusNotFound)
+}
+
 func TestWebServerAddsSharedSecretToProxyRequests(t *testing.T) {
 	// user -> web and web -> k8shim are independent legs with their own secrets
 	userSecret := "user-secret"
