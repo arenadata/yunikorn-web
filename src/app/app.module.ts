@@ -43,6 +43,7 @@ import { MatIconModule } from '@angular/material/icon';
 import { MatDialogModule } from '@angular/material/dialog';
 
 import { AppRoutingModule } from '@app/app-routing.module';
+import { envConfigFactory, EnvconfigService } from '@app/services/envconfig/envconfig.service';
 import { ApiErrorInterceptor } from '@app/interceptors/api-error/api-error.interceptor';
 import { AppComponent } from '@app/app.component';
 import { DashboardComponent } from '@app/components/dashboard/dashboard.component';
@@ -121,6 +122,10 @@ import { firstValueFrom } from 'rxjs';
   ],
   providers: [
     provideZoneChangeDetection({ eventCoalescing: true }),
+    provideAppInitializer(() => {
+      const initializerFn = envConfigFactory(inject(EnvconfigService));
+      return initializerFn();
+    }),
     provideAppInitializer(() => {
       const authService = inject(AuthService);
       return firstValueFrom(authService.loadIdentity());
