@@ -95,7 +95,7 @@ export class ApiErrorInterceptor implements HttpInterceptor {
   parseErrorResponse(error: any, message?: string, statusCode?: number): ApiErrorInfo | undefined {
     if (message) {
       return {
-        statusCode: statusCode ?? error?.status ?? 0,
+        statusCode: statusCode ?? 0,
         message,
         description: '',
       };
@@ -103,9 +103,9 @@ export class ApiErrorInterceptor implements HttpInterceptor {
 
     if (error) {
       return {
-        statusCode: error.StatusCode ?? error.statusCode,
-        message: error.Message ?? error.message,
-        description: error.Description ?? error.description,
+        statusCode: error.status_code,
+        message: error.message,
+        description: error.description,
       };
     } else {
       return undefined;
