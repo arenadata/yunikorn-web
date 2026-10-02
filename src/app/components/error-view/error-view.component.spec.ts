@@ -17,7 +17,10 @@
  */
 
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { provideZoneChangeDetection } from '@angular/core';
+import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { MatCardModule } from '@angular/material/card';
+import { Router } from '@angular/router';
 import { RouterTestingModule } from '@angular/router/testing';
 
 import { ErrorViewComponent } from './error-view.component';
@@ -25,21 +28,43 @@ import { ErrorViewComponent } from './error-view.component';
 describe('ErrorViewComponent', () => {
   let component: ErrorViewComponent;
   let fixture: ComponentFixture<ErrorViewComponent>;
+  let httpMock: HttpTestingController;
 
-  beforeAll(() => {
-    TestBed.configureTestingModule({
-      imports: [MatCardModule, RouterTestingModule],
+  beforeEach(async () => {
+    await TestBed.configureTestingModule({
+      imports: [HttpClientTestingModule, MatCardModule, RouterTestingModule],
       declarations: [ErrorViewComponent],
+      providers: [provideZoneChangeDetection()],
     }).compileComponents();
-  });
-
-  beforeEach(() => {
     fixture = TestBed.createComponent(ErrorViewComponent);
     component = fixture.componentInstance;
+    httpMock = TestBed.inject(HttpTestingController);
     fixture.detectChanges();
   });
 
+  afterEach(() => httpMock.verify());
+
   it('should create the component', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('retries whoami and returns to the saved in-app route when identity is confirmed', async () => {
+    const router = TestBed.inject(Router);
+    const navigateSpy = vi.spyOn(router, 'navigateByUrl').mockResolvedValue(true);
+    component.apiError = {
+      statusCode: 503,
+      message: 'Unable to complete sign in',
+      description: 'Error status: 503.',
+      authLoginCompletion: true,
+    };
+    component.lastActiveUrl = '/nodes?partition=default';
+
+    (fixture.nativeElement.querySelector('.try-btn') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    httpMock.expectOne('/auth/whoami').flush({ mode: 'ldap', user: 'alice', displayName: 'Alice' });
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(navigateSpy).toHaveBeenCalledWith('/nodes?partition=default', { replaceUrl: true });
   });
 });

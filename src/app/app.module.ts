@@ -34,6 +34,7 @@ import { MatTableModule } from '@angular/material/table';
 import { MatPaginatorModule } from '@angular/material/paginator';
 import { MatSortModule } from '@angular/material/sort';
 import { MatInputModule } from '@angular/material/input';
+import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatTooltipModule } from '@angular/material/tooltip';
 import { MatMenuModule } from '@angular/material/menu';
 import { MatButtonModule } from '@angular/material/button';
@@ -64,6 +65,9 @@ import { AppNodeUtilizationsComponent } from '@app/components/app-node-utilizati
 import { VerticalBarChartComponent } from '@app/components/vertical-bar-chart/vertical-bar-chart.component';
 import { LicensesModalComponent } from '@app/components/licenses-modal/licenses-modal.component';
 import { CardComponent } from './components/card/card.component';
+import { LoginComponent } from './components/login/login.component';
+import { AuthService } from '@app/services/auth/auth.service';
+import { firstValueFrom } from 'rxjs';
 
 @NgModule({
   declarations: [
@@ -87,6 +91,7 @@ import { CardComponent } from './components/card/card.component';
     VerticalBarChartComponent,
     LicensesModalComponent,
     CardComponent,
+    LoginComponent,
   ],
   imports: [
     BrowserModule,
@@ -106,6 +111,7 @@ import { CardComponent } from './components/card/card.component';
     MatPaginatorModule,
     MatSortModule,
     MatInputModule,
+    MatFormFieldModule,
     MatTooltipModule,
     MatMenuModule,
     MatButtonModule,
@@ -119,6 +125,10 @@ import { CardComponent } from './components/card/card.component';
     provideAppInitializer(() => {
       const initializerFn = envConfigFactory(inject(EnvconfigService));
       return initializerFn();
+    }),
+    provideAppInitializer(() => {
+      const authService = inject(AuthService);
+      return firstValueFrom(authService.loadIdentity());
     }),
     {
       provide: HTTP_INTERCEPTORS,

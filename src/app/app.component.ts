@@ -16,14 +16,17 @@
  * limitations under the License.
  */
 
-import { Component, OnInit } from '@angular/core';
+import { Component, DestroyRef, OnInit } from '@angular/core';
 import { ActivatedRoute, Router, NavigationEnd } from '@angular/router';
 import { debounceTime, filter } from 'rxjs/operators';
 import { fromEvent } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { EventBusService, EventMap } from '@app/services/event-bus/event-bus.service';
 import { LicensesModalComponent } from '@app/components/licenses-modal/licenses-modal.component';
 import { MatDialog } from '@angular/material/dialog';
+import { AuthService } from '@app/services/auth/auth.service';
+import { HttpErrorResponse } from '@angular/common/http';
 
 @Component({
   selector: 'app-root',
@@ -33,22 +36,36 @@ import { MatDialog } from '@angular/material/dialog';
 })
 export class AppComponent implements OnInit {
   isNavOpen = true;
+  isLoginPage = false;
+  isLoggingOut = false;
+  logoutError = '';
   breadcrumbs: Array<{ label: string; url: string }> = [];
+  readonly authIdentity$ = this.authService.identity$;
 
   constructor(
     private route: ActivatedRoute,
     private router: Router,
     private eventBus: EventBusService,
-    private dialog: MatDialog
+    private dialog: MatDialog,
+    private authService: AuthService,
+    private destroyRef: DestroyRef
   ) {}
 
   ngOnInit() {
-    this.router.events.pipe(filter((event) => event instanceof NavigationEnd)).subscribe(() => {
-      this.generateBreadcrumb();
-    });
+    this.isLoginPage = this.router.url.startsWith('/login');
+    this.router.events
+      .pipe(
+        filter((event) => event instanceof NavigationEnd),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe(() => {
+        this.isLoginPage = this.router.url.startsWith('/login');
+        this.generateBreadcrumb();
+      });
 
     fromEvent(window, 'resize')
       .pipe(debounceTime(500))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.eventBus.publish(EventMap.WindowResizedEvent));
   }
 
@@ -110,6 +127,25 @@ export class AppComponent implements OnInit {
     this.dialog.open(LicensesModalComponent, {
       maxWidth: '800px',
       disableClose: true,
+    });
+  }
+
+  logout(): void {
+    if (this.isLoggingOut) {
+      return;
+    }
+
+    this.isLoggingOut = true;
+    this.logoutError = '';
+    this.authService.logout().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: () => {
+        this.isLoggingOut = false;
+        void this.router.navigateByUrl('/login', { replaceUrl: true });
+      },
+      error: (error: HttpErrorResponse) => {
+        this.isLoggingOut = false;
+        this.logoutError = `Unable to log out. Error status: ${error.status}.`;
+      },
     });
   }
 }

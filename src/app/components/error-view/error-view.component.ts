@@ -16,9 +16,11 @@
  * limitations under the License.
  */
 
-import { Component, OnInit } from '@angular/core';
+import { Component, DestroyRef, OnInit } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ApiErrorInfo } from '@app/models/api-error-info.model';
+import { AuthService } from '@app/services/auth/auth.service';
 
 @Component({
   selector: 'app-error-view',
@@ -29,22 +31,59 @@ import { ApiErrorInfo } from '@app/models/api-error-info.model';
 export class ErrorViewComponent implements OnInit {
   apiError: ApiErrorInfo | null = null;
   lastActiveUrl = '';
+  isRetrying = false;
+  private requiresIdentityCheck = false;
 
   constructor(
     private activatedRoute: ActivatedRoute,
-    private router: Router
+    private router: Router,
+    private authService: AuthService,
+    private destroyRef: DestroyRef
   ) {}
 
   ngOnInit() {
-    this.apiError = window.history.state;
-    this.lastActiveUrl = this.activatedRoute.snapshot.queryParams['last'];
+    this.activatedRoute.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((queryParams) => {
+        this.lastActiveUrl = queryParams.get('last') ?? '';
+        this.requiresIdentityCheck = queryParams.get('identityCheck') === 'required';
+        this.apiError = this.requiresIdentityCheck
+          ? {
+              statusCode: 0,
+              message: 'Unable to verify session',
+              description: 'Retry the session check to continue.',
+              forceDisplay: true,
+            }
+          : window.history.state;
+      });
   }
 
   retryLastActiveUrlAgain() {
+    if (this.requiresIdentityCheck || this.apiError?.authLoginCompletion) {
+      if (this.isRetrying) {
+        return;
+      }
+
+      this.isRetrying = true;
+      this.authService
+        .loadIdentity()
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((identity) => {
+          this.isRetrying = false;
+          if (identity.mode === 'ldap' && !identity.user) {
+            const last = this.lastActiveUrl ? `?last=${encodeURIComponent(this.lastActiveUrl)}` : '';
+            void this.router.navigateByUrl(`/login${last}`, { replaceUrl: true });
+          } else if (identity.mode) {
+            void this.router.navigateByUrl(this.lastActiveUrl || '/dashboard', { replaceUrl: true });
+          }
+        });
+      return;
+    }
+
     if (this.lastActiveUrl) {
-      this.router.navigateByUrl(this.lastActiveUrl);
+      void this.router.navigateByUrl(this.lastActiveUrl);
     } else {
-      this.router.navigateByUrl('/');
+      void this.router.navigateByUrl('/');
     }
   }
 }

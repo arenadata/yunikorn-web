@@ -16,10 +16,16 @@
  * limitations under the License.
  */
 
-export interface ApiErrorInfo {
-  statusCode: number;
-  message: string;
-  description: string;
-  forceDisplay?: boolean;
-  authLoginCompletion?: boolean;
+export type AuthMode = 'ldap' | 'kerberos' | 'kerberos_ldap' | 'mtls' | 'shared_secret' | 'none';
+
+export interface AuthIdentity {
+  readonly mode: AuthMode | null;
+  readonly user: string | null;
+  readonly displayName: string | null;
 }
+
+export const EMPTY_AUTH_IDENTITY: AuthIdentity = {
+  mode: null,
+  user: null,
+  displayName: null,
+};
