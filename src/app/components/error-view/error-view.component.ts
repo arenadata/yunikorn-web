@@ -32,6 +32,7 @@ export class ErrorViewComponent implements OnInit {
   apiError: ApiErrorInfo | null = null;
   lastActiveUrl = '';
   isRetrying = false;
+  private requiresIdentityCheck = false;
 
   constructor(
     private activatedRoute: ActivatedRoute,
@@ -41,12 +42,24 @@ export class ErrorViewComponent implements OnInit {
   ) {}
 
   ngOnInit() {
-    this.apiError = window.history.state;
-    this.lastActiveUrl = this.activatedRoute.snapshot.queryParams['last'];
+    this.activatedRoute.queryParamMap
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((queryParams) => {
+        this.lastActiveUrl = queryParams.get('last') ?? '';
+        this.requiresIdentityCheck = queryParams.get('identityCheck') === 'required';
+        this.apiError = this.requiresIdentityCheck
+          ? {
+              statusCode: 0,
+              message: 'Unable to verify session',
+              description: 'Retry the session check to continue.',
+              forceDisplay: true,
+            }
+          : window.history.state;
+      });
   }
 
   retryLastActiveUrlAgain() {
-    if (this.apiError?.authLoginCompletion) {
+    if (this.requiresIdentityCheck || this.apiError?.authLoginCompletion) {
       if (this.isRetrying) {
         return;
       }

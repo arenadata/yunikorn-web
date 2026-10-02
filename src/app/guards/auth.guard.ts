@@ -31,6 +31,12 @@ export class AuthGuard implements CanActivate {
   canActivate(_route: ActivatedRouteSnapshot, state: RouterStateSnapshot): boolean | UrlTree {
     const identity = this.authService.currentIdentity;
 
+    if (identity.mode === null) {
+      return this.router.createUrlTree(['/error'], {
+        queryParams: { identityCheck: 'required', last: state.url },
+      });
+    }
+
     if (identity.mode === 'ldap' && !identity.user) {
       return this.router.createUrlTree(['/login'], { queryParams: { last: state.url } });
     }
