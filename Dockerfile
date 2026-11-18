@@ -27,7 +27,7 @@ RUN pnpm install -r --offline
 RUN pnpm build:prod
 
 # Build Go binary with embedded frontend assets
-FROM golang:1.25-alpine as backend
+FROM golang:1.26.10-alpine as backend
 WORKDIR /build
 
 COPY go.mod go.sum ./
